@@ -10,7 +10,7 @@ go build
 
 ###Run
 ```
-GOMAXPROCS=3 ./wordpairpuzzle
+./wordpairpuzzle
 ```
 GOMAXPROCS sets the maximum number of CPUs that can be executing simultaneously and 
 returns the previous setting. If n < 1, it does not change the current setting.

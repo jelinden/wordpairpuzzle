@@ -8,22 +8,24 @@ import (
 	"regexp"
 	"time"
 	"sort"
+	"unicode/utf8"
+	"strconv"
 )
 
 var differentWords = make(map[string]string)
 var countUniqueChars = make(map[string]int)
 var reg, _ = regexp.Compile("[^a-zåäö ]+")
+var regWhiteSpace, _ = regexp.Compile("[\\s]+")
+const FILENAME = "alastalon_salissa.txt"
 
 // a program to read all words from a file and then get the
 // two words containing most unique letters combined
 func main() {
 	t1 := time.Now()
-	readFile("./alastalon_salissa.txt")
+	readFile(FILENAME)
 	fmt.Println("reading the book took", time.Now().Sub(t1))
-	iterateCombinedWords(differentWords)
-	for key, value := range countUniqueChars {
-		fmt.Println("combined words", key, "had", value, "letters")
-	}
+	iterateCombinedWords()
+	printAnswer()
 	fmt.Println("task took", time.Now().Sub(t1))
 }
 
@@ -35,13 +37,18 @@ func readFile(path string) {
 	scanner.Split(bufio.ScanLines)
 
 	for scanner.Scan() {
-		var words sort.StringSlice = strings.Split(sanitizeString(strings.ToLower(scanner.Text())), " ")
-		wordsFromLine(words)
+		sanitizedString := sanitizeString(strings.ToLower(scanner.Text()))
+		if sanitizedString != "" && sanitizedString != " " {
+			var words sort.StringSlice = strings.Split(sanitizedString, " ")
+			wordsFromLine(words)
+		}
 	}
 }
 
 func sanitizeString(line string) string {
-	return reg.ReplaceAllString(line, "")
+	line = reg.ReplaceAllString(line, "")
+	regWhiteSpace.ReplaceAllString(line, " ")
+	return line
 }
 
 func wordsFromLine(words []string) {
@@ -57,6 +64,7 @@ func wordsFromLine(words []string) {
 	}
 }
 
+// remove duplicate characters from each word and sort them alphabetically
 func removeDuplicateCharacters(word string) string {
 	found := make(map[string]bool)
 	var chars sort.StringSlice = []string{}
@@ -70,25 +78,34 @@ func removeDuplicateCharacters(word string) string {
 	return strings.Join(chars, "")
 }
 
-func iterateCombinedWords(words map[string]string) {
-	var keys = sortedMapKeys(words)
-	maxValue, count := 0, 0
+// go through every word and compare them to other words
+func iterateCombinedWords() {
+	var keys = sortedMapKeys(differentWords)
+	maxValue := 0
 	cs := make(chan Result)
 	defer close(cs)
+	allKeys := make([]string, len(keys))
+	copy(allKeys, keys)
+	handleWords(&keys, &differentWords, &maxValue, &cs)
+}
 
-	for k := range keys {
-		t1 := time.Now()
-		go collectUniqueCharWords(cs, &words, maxValue, &countUniqueChars, keys[k], keys)
-		returnedMaxValue := <- cs
-		if returnedMaxValue.maxValue >= maxValue {
-			maxValue = returnedMaxValue.maxValue
-		}
-		count += 1
-		fmt.Println(count, "of", len(words), "(", len(countUniqueChars), "items, for which length is", maxValue, "),",
-			"task took", time.Now().Sub(t1))
+// the main loop for going through all words
+func handleWords(keys *[]string, words *map[string]string, maxValue *int, cs *chan Result) {
+	t1 := time.Now()
+	go collectUniqueCharWords(*cs, words, maxValue, &countUniqueChars, &(*keys)[0], keys)
+	returnedMaxValue := <-*cs
+	if returnedMaxValue.maxValue >= *maxValue {
+		*maxValue = returnedMaxValue.maxValue
+	}
+	fmt.Println(len(*keys), "left (" + strconv.Itoa(len(countUniqueChars)) + " items which have",
+		*maxValue, "different letters),", "task took", time.Now().Sub(t1))
+	if len(*keys) > 1 {
+		*keys = (*keys)[:0+copy((*keys)[0:], (*keys)[1:])]
+		handleWords(keys, words, maxValue, cs)
 	}
 }
 
+// no, you don't have an ordered map in golang
 func sortedMapKeys(words map[string]string) []string {
 	var keys []string
 	for key := range words {
@@ -98,18 +115,26 @@ func sortedMapKeys(words map[string]string) []string {
 	return keys
 }
 
-func collectUniqueCharWords(c chan Result, words *map[string]string, maxValue int, countUniqueChars *map[string]int, k string, keys []string) {
-	for innerKey := range keys {
-		if (len(k + keys[innerKey])) > maxValue {
-			twoWordsLength := len(removeDuplicateCharacters(k + keys[innerKey]))
-			if twoWordsLength >= maxValue {
-				if twoWordsLength > maxValue {
+// count the length of combined two words and their unique letters
+func collectUniqueCharWords(c chan Result, words *map[string]string, maxValue *int, countUniqueChars *map[string]int, k *string, keys *[]string) {
+	for innerKey := range (*keys) {
+		if (utf8.RuneCountInString(*k + (*keys)[innerKey])) >= *maxValue {
+			twoWordsLength := utf8.RuneCountInString(removeDuplicateCharacters(*k + (*keys)[innerKey]))
+			if twoWordsLength >= *maxValue {
+				if twoWordsLength > *maxValue {
 					*countUniqueChars = make(map[string]int)
 				}
-				maxValue = twoWordsLength
-				(*countUniqueChars)[(*words)[k] + "," + (*words)[keys[innerKey]]] = twoWordsLength
+				*maxValue = twoWordsLength
+				(*countUniqueChars)[(*words)[*k] + ", " + (*words)[(*keys)[innerKey]]] = twoWordsLength
 			}
 		}
 	}
-	c <- Result{maxValue}
+	c <- Result{*maxValue}
+}
+
+func printAnswer() {
+	for key, value := range countUniqueChars {
+		fmt.Println("combined words", removeDuplicateCharacters(sanitizeString(key)), key, "had", value, "different letters")
+	}
+	fmt.Println("There were", len(countUniqueChars), "different word pairs with same length")
 }
